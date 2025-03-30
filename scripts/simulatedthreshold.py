@@ -16,8 +16,8 @@ from sklearn.utils import shuffle
 
 #parameters
 window_length = 100
-num_repeats = [1000]
-stream_length = 10000
+num_repeats = [10]
+stream_length = 500
 sigma = 1
 seed_val = [2023]
 epsilon = 0.05

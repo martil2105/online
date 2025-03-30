@@ -16,8 +16,8 @@ from sklearn.utils import shuffle
 
 #parameters
 window_length = 100
-num_repeat = 4
-stream_length = 10000 
+num_repeat = 5
+stream_length = 3000 
 sigma = 1
 seed_val = [2023]
 epsilon = 0.05
@@ -90,7 +90,7 @@ def detect_change_in_stream_loc(stream, model, window_length, k,threshold, runs)
     num_windows = len(stream) - window_length + 1
     detection_time = 0
     consecutive_changes = 0
-    
+    prob_at_next_window = []
     for i in range(num_windows):
         window_data = stream[i: i + window_length]
         window_input = np.expand_dims(window_data, axis=0)
@@ -100,8 +100,14 @@ def detect_change_in_stream_loc(stream, model, window_length, k,threshold, runs)
 
         if prob[0][1] > threshold: 
             detection_time = i + window_length
+            window_data = stream[i+1: i + window_length+1]
+            window_input = np.expand_dims(window_data, axis=0)
+            logits = model.predict(window_input, verbose=0)
+            prob = tf.nn.softmax(logits).numpy()
+            prob_at_next_window.append(prob[0][1])
             break
-    return detection_time
+        
+    return detection_time, prob_at_next_window
 
 def calculate_detection_delay(detected_time, true_tau):
     """Calculate the detection delay."""
@@ -122,7 +128,7 @@ def process_streams(data, true_taus, model, window_length, thresholds):
     for i in range(num_streams):
         stream = data[i]
         for j, threshold in enumerate(thresholds):
-            detected_time = detect_change_in_stream_loc(stream, model, window_length, k=1, threshold=threshold, runs=i)
+            detected_time, prob_at_next_window = detect_change_in_stream_loc(stream, model, window_length, k=1, threshold=threshold, runs=i)
             detection_delay[i, j] = calculate_detection_delay(detected_time, true_taus[i])
             run_length[i, j] = detected_time if detected_time > 0 else stream_length
 
@@ -130,6 +136,7 @@ def process_streams(data, true_taus, model, window_length, thresholds):
             if true_taus[i] > 0:
                 if detected_time < true_taus[i]:
                     false_positive_count += 1
+                    print(prob_at_next_window)
                 elif detected_time == 0:
                     false_negative_count += 1
                 elif detected_time > true_taus[i]:
@@ -137,6 +144,7 @@ def process_streams(data, true_taus, model, window_length, thresholds):
             elif true_taus[i] == 0:
                 if detected_time > 0:
                     false_positive_count += 1
+                    print(prob_at_next_window)
                 elif detected_time == 0:
                     true_negative_count += 1
 
@@ -149,6 +157,10 @@ detection_delay_alt, run_length_alt, fp_alt, fn_alt, tp_alt, tn_alt = process_st
 detection_delay_null, run_length_null, fp_null, fn_null, tp_null, tn_null = process_streams(data_null, true_tau_null, model, window_length, thresholds)
 
 # Combine results
+fp = fp_alt + fp_null
+fn = fn_alt + fn_null
+tp = tp_alt + tp_null
+tn = tn_alt + tn_null
 detection_delay = detection_delay_alt 
 run_length = run_length_null
 
@@ -157,11 +169,8 @@ print(f"Run Length: {run_length}")
 arl = np.mean(run_length, axis=0)
 print(f"ARL: {arl}")
 print(f"True Tau: {true_tau_alt}")
+print(f"false positive: {fp}") #too early
+print(f"false negative: {fn}") #should have detected
+print(f"false classificaation {fp+fn}")
+plt.figure(figsize=(10, 10))  # Adjusted figure size for better layout
 
-plt.figure(figsize=(10, 5))
-plt.subplot(2,1,1)
-#plt.plot(data_all[0])
-
-plt.subplot(2,1,2)
-#plt.plot(data_all[1])
-#plt.show()
