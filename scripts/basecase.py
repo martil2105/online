@@ -15,8 +15,8 @@ from sklearn.utils import shuffle
 
 #parameters
 window_length = 100
-num_repeat = 20
-stream_length = [200, 600, 1000]
+num_repeat = 1
+stream_length = [500]
 sigma = 1
 seed_val = [2023]
 
@@ -81,7 +81,6 @@ detected_cps = [None] * num_streams
 
 for i in range(num_streams):
     stream = data_all[i]
- 
     predicted_labels[i] = detect_change_in_stream(stream, model, window_length)
     print(f"Stream {i}: predicted label = {predicted_labels[i]}, true tau = {true_taus[i]}")
 true_labels = y_all.flatten()
@@ -106,21 +105,3 @@ print(f"False negative: {len(false_negative[0])}")
 
 
 
-"""
-example_idx = np.where(true_labels == 1)[0][0]  # Find first stream with a change
-example_stream = data_all[example_idx]
-pred = detect_change_in_stream(example_stream, model, window_length)
-example_true_tau = true_taus[example_idx]
-
-plt.figure(figsize=(10, 6))
-plt.plot(example_stream, label="Time Series")
-plt.title(f"Example Stream (Detected Change: {pred})")
-plt.xlabel("Time Step")
-plt.ylabel("Signal Value")
-plt.axvline(x=true_taus[example_idx], color='r', linestyle='--', label="True Change")
-plt.legend()
-plt.grid(True)
-plot_save_path = Path("datasets", "plots", f"{model_name}_binary_classification_sigma{sigma}.png")
-plot_save_path.parent.mkdir(parents=True, exist_ok=True)
-plt.savefig(plot_save_path)
-"""

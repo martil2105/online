@@ -16,8 +16,8 @@ from sklearn.utils import shuffle
 
 #parameters
 window_length = 100
-num_repeat = 1
-stream_length = 100000
+num_repeat = 200 #200
+stream_length = 2000
 sigma = 1
 seed_val = [2023]
 epsilon = 0.05
@@ -27,9 +27,9 @@ tau_bound = 2
 B_bound = np.array([0.25, 1.75])
 rhos = 0
 #k = 5
-thresholds = [0.96]
-k_values = [1,2,3]
-#load model
+thresholds = [0.6,0.7,0.8,0.85,0.9,0.95,0.99]
+k_values = [1,3,5,7]
+#load model 
 current_file = "traincpd"
 model_name = "n100N400m24l1cpd"
 logdir = Path("tensorboard_logs", f"{current_file}")
@@ -63,113 +63,98 @@ result_alt = DataGenAlternative(
 data_alt = result_alt["data"]  # .shape (N_alt, stream_length)
 true_tau_alt = result_alt["tau_alt"]  # tau index"""
 
-# Generate null data
 data_null = GenDataMean(N_null, stream_length, cp=None, mu=(mu_L, mu_L), sigma=sigma)
-true_tau_null = np.zeros((N_null,), dtype=np.int32)  # no change → set to 0
-
-# Concatenate alternative and null streams into one dataset
-#data_all = np.concatenate((data_alt, data_null), axis=0)  # shape: (2*num_repeat, stream_length)
-
-# Create labels: 1 for alternative (change present), 0 for null (no change)
-#y_all = np.repeat((1, 0), (N_alt, N_null)).reshape((2 * num_repeat, 1))
-# Also combine true change-point locations for later reference
-true_taus = np.concatenate((true_tau_alt, true_tau_null), axis=0)
-
-# Shuffle the dataset (and ensure labels and true change-points are shuffled together)
-#data_all, y_all, true_taus = shuffle(data_all, y_all, true_taus, random_state=42)
-
-#print(true_taus)
-#num_streams = data_all.shape[0]  # number of streams
 num_streams = data_alt.shape[0]
-false_positive_count = 0
-false_negative_count = 0
-true_positive_count = 0
-true_negative_count = 0
-
-def detect_change_in_stream_loc(stream, model, window_length, k,threshold, runs):
+def detect_change_batched(stream, model, window_length, k, threshold):
     num_windows = len(stream) - window_length + 1
-    detection_time = 0
-    consecutive_changes = 0
-    prob_at_next_window = []
-    for i in range(num_windows):
-        if i % 10000 == 0:
-            print(f"Current step: {i}")
-        window_data = stream[i: i + window_length]
-        window_input = np.expand_dims(window_data, axis=0)
-        logits = model.predict(window_input, verbose=0)
-        prob = tf.nn.softmax(logits).numpy()
-        
-        #print(i,prob,threshold,runs)
+    windows = np.array([stream[i:i+window_length] for i in range(num_windows)])
+    windows = np.expand_dims(windows, axis=-1)
 
-        if prob[0][1] > threshold: 
-            consecutive_changes += 1
-            if consecutive_changes == k:
-                detection_time = i + window_length
-                break
+    logits = model.predict(windows, verbose=0)
+    probs = tf.nn.softmax(logits, axis=1).numpy()
+    change_probs = probs[:, 1]
+
+    consecutive = 0
+    for i, prob in enumerate(change_probs):
+        if prob > threshold:
+            consecutive += 1
+            if consecutive >= k:
+                return i + window_length
         else:
-            consecutive_changes = 0
-    return detection_time, prob_at_next_window
+            consecutive = 0
+    return 0
 
-def calculate_detection_delay(detected_time, true_tau):
-    """Calculate the detection delay."""
-    return max(0, detected_time - true_tau)
-
-def process_streams(data, true_taus, model, window_length, thresholds, k):
-    """Process streams to calculate detection delays and run lengths."""
-    num_streams = data.shape[0]
-    detection_delay = np.zeros((num_streams, len(thresholds)))
-    run_length = np.zeros((num_streams, len(thresholds)))
-
-    # Initialize counters
-    false_positive_count = 0
-    false_negative_count = 0
-    true_positive_count = 0
-    true_negative_count = 0
-
-    for i in range(num_streams):
-        stream = data[i]
-        for j, threshold in enumerate(thresholds):
-            detected_time, prob_at_next_window = detect_change_in_stream_loc(stream, model, window_length, k=k, threshold=threshold, runs=i)
-            detection_delay[i, j] = calculate_detection_delay(detected_time, true_taus[i])
-            run_length[i, j] = detected_time if detected_time > 0 else stream_length
-
-            # Update counters
-            if true_taus[i] > 0:
-                if detected_time < true_taus[i]:
-                    false_positive_count += 1
-                    print(prob_at_next_window)
-                elif detected_time == 0:
-                    false_negative_count += 1
-                elif detected_time > true_taus[i]:
-                    true_positive_count += 1
-            elif true_taus[i] == 0:
-                if detected_time > 0:
-                    false_positive_count += 1
-                    print(prob_at_next_window)
-                elif detected_time == 0:
-                    true_negative_count += 1
-
-            print(f"Stream {i}, Threshold {threshold}: Detected Time = {detected_time}, True Tau = {true_taus[i]}")
-
-    return detection_delay, run_length, false_positive_count, false_negative_count, true_positive_count, true_negative_count
-average_run_length = []
+average_run_length = np.zeros((len(thresholds), len(k_values)))
+detection_delay = np.zeros((len(thresholds), len(k_values)))
+false_positive = np.zeros((len(thresholds), len(k_values)))
+false_negative = np.zeros((len(thresholds), len(k_values)))
 # Process alternative and null streams
-for k in k_values:
-    #detection_delay_alt, run_length_alt, fp_alt, fn_alt, tp_alt, tn_alt = process_streams(data_alt, true_tau_alt, model, window_length, thresholds, k)
-    detection_delay_null, run_length_null, fp_null, fn_null, tp_null, tn_null = process_streams(data_null, true_tau_null, model, window_length, thresholds, k)
-    average_run_length.append(np.mean(run_length_null, axis=0))
-    print(average_run_length)
-# Combine results
-#fp = fp_alt + fp_null
-#fn = fn_alt + fn_null
-#tp = tp_alt + tp_null
-#tn = tn_alt + tn_null
-#detection_delay = detection_delay_alt 
-run_length = run_length_null
 
-plt.plot(average_run_length, k_values, marker="o")
-plt.xscale("log")
-plt.xlabel("Average Run Length")
-plt.ylabel("k")
-plt.title("Average Run Length vs k")
+for i, threshold in enumerate(thresholds):
+    print(f"Threshold: {threshold}")
+    for j, k in enumerate(k_values):
+        print(f"K: {k}")
+        run_lengths = []
+        for l in range(num_repeat):
+            detection_time = detect_change_batched(data_null[l], model, window_length, k, threshold)
+            run_lengths.append(detection_time if detection_time > 0 else stream_length)
+        average_run_length[i, j] = np.mean(run_lengths)
+        detection_delays = []
+        for l in range(num_repeat):
+            detection_time = detect_change_batched(data_alt[l], model, window_length, k, threshold)
+            #print(f"Detection time: {detection_time}",true_tau_alt[l])
+            if detection_time > 0 and detection_time > true_tau_alt[l]:
+                detection_delays.append(detection_time - true_tau_alt[l])
+                print(f"Detection delay: {detection_time - true_tau_alt[l]}")
+                print(f"Detection time: {detection_time}",true_tau_alt[l])
+            if detection_time > 0 and detection_time < true_tau_alt[l]:
+                false_positive[i, j] += 1
+            if detection_time == 0 and true_tau_alt[l] > 0:
+                false_negative[i, j] += 1
+        detection_delay[i, j] = np.mean(detection_delays)
+print(detection_delay)
+print(f"Average run length: {average_run_length}")
+print(f"False positive: {false_positive}")
+false_positive_rate = false_positive / num_repeat
+false_negative_rate = false_negative / num_repeat
+expected_detection_delay = np.mean(detection_delay, axis=1)
+print(f"Expected detection delay: {expected_detection_delay}")
+plt.figure(figsize=(20, 8))
+# Plot 1: Detection delay
+plt.subplot(2, 2, 1)
+for i in range(len(k_values)):
+    plt.plot(thresholds, detection_delay[:,i], "--",label=f"K={k_values[i]}",marker="o", markersize=6)
+plt.xlabel("Threshold")
+plt.ylabel("Detection delay")
+plt.title("Detection delay vs Threshold")
+plt.legend()
+
+# Plot 2: Average run length
+plt.subplot(2, 2, 2)
+for i in range(len(k_values)):
+    plt.plot(thresholds, average_run_length[:,i], "--", label=f"K={k_values[i]}",marker="o", markersize=6)
+plt.xlabel("Threshold")
+plt.ylabel("Average run length")
+plt.title("Average run length vs Threshold")
+plt.legend()
+
+# Plot 3: False positive
+plt.subplot(2, 2, 3)
+for i in range(len(k_values)):
+    plt.plot(thresholds, false_positive_rate[:,i], "--", label=f"K={k_values[i]}",marker="o", markersize=6)
+plt.xlabel("Threshold")
+plt.ylabel("False positive rate")
+plt.title("False positive rate vs Threshold")
+plt.legend()
+
+# Plot 4: False negative
+plt.subplot(2, 2, 4)
+for i in range(len(k_values)):
+    plt.plot(thresholds, false_negative_rate[:,i], "--", label=f"K={k_values[i]}",marker="o", markersize=6)
+plt.xlabel("Threshold")
+plt.ylabel("False negatives")
+plt.title("False negative vs Threshold")
+plt.legend()
+#plt.savefig(f"arlandeddwithk{stream_length}.png")
+plt.tight_layout()
 plt.show()

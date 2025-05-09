@@ -43,13 +43,14 @@ epsilon = 0.05
 Q = np.array(np.floor(np.log2(n_vec / 2)), dtype=np.int32) + 1
 # the number of hidden nodes
 m_mat = np.c_[3 * np.ones((n_len,), dtype=np.int32), 4 * Q, 2 * n_vec - 2]
-N_vec = np.arange(100, 800, 100, dtype=np.int32)  # the sample size
+N_vec = np.arange(700, 900, 100, dtype=np.int32)  # the sample size
 num_N = len(N_vec)
 B = np.sqrt(8 * np.log(n_vec / epsilon) / n_vec)
 mu_L = 0
 tau_bound = 2
 B_bound = np.array([0.5, 1.5])
 rho = 0.0
+scale = 0.5
 # parameters for neural network
 learning_rate = 1e-3
 epochs = 200
@@ -62,7 +63,7 @@ print(cusum_result_folder)
 current_file = file_path.stem
 print(current_file)
 logdir_base = Path("tensorboard_logs")
-logdir = Path(logdir_base, current_file)
+logdir = Path(logdir_base, current_file+f"scale{scale}")
 num_models = n_len * num_N
 
 
@@ -85,14 +86,15 @@ for i in range(n_len):
             ARcoef=rho,
             tau_bound=tau_bound,
             B_bound=B_bound,
-            ar_model='Gaussian',
-            sigma=1
+            ar_model='ARH',
+            sigma=1,
+            scale=scale
         )
         data_alt = result["data"]
         tau_alt = result["tau_alt"]
         mu_R_alt = result["mu_R_alt"]
         # generate dataset for null hypothesis
-        data_null = GenDataMean(N, n, cp=None, mu=(mu_L, mu_L), sigma=1)  # Use calculated N_no_change
+        data_null = GenDataMeanARH(N, n, cp=None, mu=(mu_L, mu_L), coef=rho, scale=scale)  # Use calculated N_no_change
         data_all = np.concatenate((data_alt, data_null), axis=0)
         y_all = np.repeat((1, 0), N).reshape((2 * N, 1))
         tau_all = np.concatenate((tau_alt, np.repeat(0, N)), axis=0)

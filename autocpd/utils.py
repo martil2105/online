@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
-
+from statsmodels.tsa.arima_process import ArmaProcess
+from scipy.stats import cauchy
 
 def GenDataMean(N, n, cp, mu, sigma):
     """
@@ -119,6 +120,45 @@ def DataGenAlternative(
             data[i, :] = GenDataVariance(1, n, cp=tau_all[i], mu=mu_L, sigma=[sigma_L, sigma_R])
     return {"data": data, "tau_alt": tau_all, "mu_R_alt": mu_R_all}
 
+def GenDataMeanAR(N, n, cp, mu, sigma, coef):
+    """
+    The function  generates the data for change in mean with AR(1) noise.
+    When "cp" is None, it generates the data without change point.
+
+    Parameters
+    ----------
+    N : int
+        the sample size
+    n : int
+        the length of time series
+    cp : int
+        the change point, only 1 change point is accepted in this function.
+    mu : float
+        the piecewise mean
+    sigma : float
+        the standard deviation of Gaussian innovations in AR(1) noise
+    coef : float scalar
+        the coefficients of AR(1) model
+
+    Returns
+    -------
+    numpy array
+        2D array with size (N, n)
+    """
+    arparams = np.array([1, -coef])
+    maparams = np.array([1])
+    ar_process = ArmaProcess(arparams, maparams)
+    if cp is None:
+        data = mu[0] + np.transpose(
+            ar_process.generate_sample(nsample=(n, N), scale=sigma)
+        )
+    else:
+        noise = ar_process.generate_sample(nsample=(n, N), scale=sigma)
+        signal = np.repeat(mu, (cp, n - cp))
+        data = np.transpose(noise) + signal
+    return data
+
+
 def MaxCUSUM(x):
     """
     To return the maximum of CUSUM
@@ -162,7 +202,7 @@ def ComputeCUSUM(x):
 
     return a
 
-def detect_change_in_stream(stream, model, window_length,k ):
+def detect_change_in_stream(stream, model, window_length,k, threshold ):
 
     num_windows = len(stream) - window_length + 1
     predictions = np.zeros(num_windows)
@@ -173,9 +213,13 @@ def detect_change_in_stream(stream, model, window_length,k ):
         window_data = stream[i: i + window_length]
         window_input = np.expand_dims(window_data, axis=0)
         logits = model.predict(window_input, verbose=0)
-        output = np.argmax(logits, axis=1)
-    
-        predictions[i] = output  # Binary label (1=change, 0=no change)
+        probs = tf.nn.softmax(logits, axis=1)
+        prob_change = probs[0,1]
+        print(f"prob_change: {probs}")
+        if prob_change > threshold:
+            predictions[i] = 1
+        else:
+            predictions[i] = 0
         if predictions[i] == 1:
             #print(f"Change detected at window {i}")
             consecutive_changes += 1
@@ -188,3 +232,134 @@ def detect_change_in_stream(stream, model, window_length,k ):
         
     return detected_change#, detected_change_windows
 #print(DataGenAlternative(1,,mu_L,n=100,B_bound=B_bound,sigma=1,ar_model="Gaussian"))
+
+def detect_change_in_stream_batched_cusum(stream, model, window_length, threshold):
+    logits_difference = []
+    num_windows = len(stream) - window_length + 1
+    windows = np.array([stream[i:i+window_length] for i in range(num_windows)])
+    windows = np.expand_dims(windows, axis=-1)
+
+    logits = model.predict(windows, verbose=0)
+    logits_diff = logits[:,1] - logits[:,0] #d_t 
+    #print(logits_diff)
+    cusum_scores = []
+    detection_times = 0
+    S = 0
+    for i in range(len(logits_diff)):
+        d_t = logits_diff[i]
+        S = max(0, S + d_t)
+        cusum_scores.append(S)
+        #print(cusum_scores)
+        if S > threshold:
+            detection_times = i+window_length
+            break
+    return detection_times, np.max(cusum_scores)
+
+def sequential_cusum(stream, k, h):
+    """
+    One-sided (positive) sequential CUSUM without numpy conversion.
+    Returns detection time (1-based) or 0 if no alarm, and full G_t sequence.
+
+    Parameters
+    ----------
+    stream : sequence of numbers
+        The observed data sequence x_1, x_2, ..., x_n.
+    k : float
+        Reference value (often half the target mean shift).
+    h : float
+        Detection threshold.
+    """
+    G_plus = np.zeros(len(stream))
+    G_minus = np.zeros(len(stream))
+    g_plus = 0.0
+    g_minus = 0.0
+    for t in range(len(stream)):
+        # ensure numeric type
+        x = stream[t]
+        g_plus = max(0.0, g_plus + ((x - mu_L) - k))
+        g_minus = min(0.0, g_minus + ((x - mu_L) +k))
+        G_plus[t] = g_plus
+        print(f"g_plus: {g_plus}, t: {t}")
+        G_minus[t] = g_minus
+        if g_plus > h:
+            return t + 1
+        if g_minus > h:
+            return t + 1
+    return 0
+
+def li_cusum(stream, window_length, threshold):
+    num_windows = len(stream) - window_length + 1
+    detection_times = 0
+    max_cusum_scores = []
+    for i in range(num_windows):
+        window_data = stream[i:i+window_length]
+        cusum_stats = ComputeCUSUM(window_data)
+        max_stat = np.max(np.abs(cusum_stats))
+    
+        max_cusum_scores.append(max_stat)
+        
+        if max_stat > threshold:
+            detection_times = i+window_length
+            break
+    return detection_times, np.max(max_cusum_scores)
+
+def GenDataMeanARH(N, n, cp, mu, coef, scale):
+    """
+	The function  generates the data for change in mean with Cauchy noise with location parameter 0 and scale parameter 'scale'. When "cp" is None, it generates the data without change point.
+
+	Parameters
+	----------
+	N : int
+		the number of data
+	n : int
+		the number of variables
+	cp : int
+		the change point, only 1 change point is accepted in this function.
+	mu : float
+		the piecewise mean
+	coef : float array
+		the coefficients of AR(p) model
+	scale : the scale parameter of Cauchy distribution
+		the coefficients of AR(p) model
+
+	Returns
+	-------
+	numpy array
+		2D array with size (N, n)
+	"""
+	# initialize
+    n1 = n + 30
+    x_0 = np.ones((N,), dtype=np.float64)
+	# eps_mat = np.random.standard_cauchy((N, n1))
+    eps_mat = cauchy.rvs(loc=0, scale=scale, size=(N, n1))
+    noise_mat = np.empty((N, n1))
+    for i in range(n1):
+        x_0 = coef * x_0 + eps_mat[:, i]
+        noise_mat[:, i] = x_0
+
+    if cp is None:
+        data = mu[0] + noise_mat[:, -n:]
+    else:
+        signal = np.repeat(mu, (cp, n - cp))
+        data = signal + noise_mat[:, -n:]
+
+    return data
+
+"""data_null = GenDataMean(10,1000, None, [0,0], 1)
+result_alt =  DataGenAlternative(
+                N_sub=1000,
+                B=0.7797898414081621,
+                mu_L=0,
+                n=1000,
+                ARcoef=0,
+                tau_bound=2,
+                B_bound=np.array([0.25, 1.75]),
+                ar_model="Gaussian",
+                sigma=1
+            )
+data_alt = result_alt["data"]
+dt, max_cusum_scores = li_cusum(data_alt[3], 100, 99999)
+print(dt)
+print(max_cusum_scores)
+plt.plot(data_alt[3])
+plt.show()"""
