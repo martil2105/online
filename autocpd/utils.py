@@ -345,6 +345,20 @@ def GenDataMeanARH(N, n, cp, mu, coef, scale):
 
     return data
 
+def detect_change_in_stream_loc_batched(stream, model, window_length, threshold):
+    num_windows = len(stream) - window_length + 1 #antall vinduer
+    windows = np.array([stream[i:i+window_length] for i in range(num_windows)]) #har alle vinduene i en array for raskere inferens, men dette er akkurat det samme som en while loop
+    windows = np.expand_dims(windows, axis=-1)  #slik at det passer NN
+    logits = model.predict(windows, verbose=0) #finner en prediction for hvert av vinduene
+    probs = tf.nn.softmax(logits, axis=1).numpy()[:, 1] #sannynlighet for at det finnes et changepoint i vinduet
+    detection_idx = np.argmax(probs > threshold) #finner den første changepointen
+    if probs[detection_idx] > threshold: 
+        detection_time = detection_idx + window_length
+    else:
+        detection_time = 0
+    return detection_time, np.max(probs)
+
+
 """data_null = GenDataMean(10,1000, None, [0,0], 1)
 result_alt =  DataGenAlternative(
                 N_sub=1000,
@@ -358,8 +372,5 @@ result_alt =  DataGenAlternative(
                 sigma=1
             )
 data_alt = result_alt["data"]
-dt, max_cusum_scores = li_cusum(data_alt[3], 100, 99999)
-print(dt)
-print(max_cusum_scores)
 plt.plot(data_alt[3])
 plt.show()"""
