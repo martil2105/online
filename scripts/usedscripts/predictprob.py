@@ -117,20 +117,16 @@ def detect_change_in_stream_loc(stream, model, window_length, k,threshold, runs)
 
         else:
             consecutive_changes = 0
-            i += 1
-        
-              
+            i += 1                 
     return detected_change, detected_change_locs
 
 run_length = np.zeros((num_streams,len(thresholds)))
 detection_delay = np.zeros((num_streams,len(thresholds)))
 for i in range(num_streams):
     for j, threshold in enumerate(thresholds):
-   
         data = data_all[i]
         detected_change, detected_change_locs = detect_change_in_stream_loc(data, model, window_length, k=1, threshold=threshold,runs=i)
         print(i)
-  
         if detected_change_locs == []:
             run_length[i, j] = stream_length
             #detection_delay[i, j] = 0

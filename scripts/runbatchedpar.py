@@ -14,13 +14,11 @@ sys.path.append(project_root)
 
 from autocpd.utils import DataGenAlternative, GenDataMean
 
-# TensorFlow threading
+
 tf.config.threading.set_intra_op_parallelism_threads(8)
 tf.config.threading.set_inter_op_parallelism_threads(8)
 
-# -----------------
-# Parameters
-# -----------------
+
 window_length = 100
 num_repeat = 100
 stream_lengths = [1000, 2000, 3000, 5000, 10000, 20000, 50000, 100000]
@@ -34,9 +32,7 @@ B_bound = np.array([0.25, 1.75])
 rhos = 0
 alpha = 0.05
 
-# -----------------
-# Load model
-# -----------------
+
 current_file = "traincpd"
 model_name = "n100N400m24l1cpd"
 logdir = Path("tensorboard_logs", current_file)
@@ -44,9 +40,7 @@ model_path = Path(logdir, model_name, "model.keras")
 print("Loading model from:", model_path)
 model = tf.keras.models.load_model(model_path)
 
-# -----------------
-# Batched detection function
-# -----------------
+
 def detect_change_in_stream_batched(stream, model, window_length, k, threshold):
     num_windows = len(stream) - window_length + 1
     windows = np.array([stream[i:i+window_length] for i in range(num_windows)])
@@ -66,9 +60,7 @@ def detect_change_in_stream_batched(stream, model, window_length, k, threshold):
             consecutive = 0
     return 0, []
 
-# -----------------
-# Main evaluation loop
-# -----------------
+
 N_alt = num_repeat
 N_null = num_repeat
 

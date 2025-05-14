@@ -10,7 +10,7 @@ begin_time = time()
 
 # Project path setup
 script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(script_dir, ".."))
+project_root = os.path.abspath(os.path.join(script_dir, "../.."))
 sys.path.append(project_root)
 
 from autocpd.utils import *
@@ -29,11 +29,11 @@ tau_bound = 2
 B_bound = np.array([0.25, 1.75])
 rhos = 0
 thresholds = [99999]
-scale = 0.5
+scale = 0.5 #cauchy skalering
 # Load model
 current_file = "traincpd"
-model_name = "n100N700m198l10cpd"
-logdir = Path("tensorboard_logs", f"traincpdscale{scale}")
+model_name = "n100N700m198l10cpd" #dypere modell
+logdir = Path("tensorboard_logs", f"traincpdscale{scale}") #trent på cauchy data
 print(logdir)
 
 model_path = Path(logdir, model_name, "model.keras")
@@ -41,10 +41,7 @@ print("Loading model from:", model_path)
 model = tf.keras.models.load_model(model_path)
 np.random.seed(seed)
 tf.random.set_seed(seed)
-#get cusum threshold
-Cusum_th = np.load(Path(project_root, "Thresholds", f"Thresholds_seed2022.npy"))
-thresholds_opt = Cusum_th[:,3]
-threshold_opt = thresholds_opt[3]
+
 
 # Batched version of detection function
 def detect_change_in_stream_loc_batched(stream, model, window_length, threshold):
@@ -63,7 +60,7 @@ def detect_change_in_stream_loc_batched(stream, model, window_length, threshold)
 
 
 # Generate null data and compute threshold percentile
-data_null = GenDataMeanARH(num_repeats, stream_length, cp=None, mu=(mu_L, mu_L), coef=rhos, scale=scale)
+data_null = GenDataMeanARH(num_repeats, stream_length, cp=None, mu=(mu_L, mu_L), coef=rhos, scale=scale) #nulldata med cauchy, gå til utils for mer info
 num_streams = data_null.shape[0]
 max_probabilities = []
 max_probabilities_cusum = []
@@ -105,7 +102,7 @@ percentiles_logit_cusum = [percentile_80_logit_cusum,percentile_85_logit_cusum,p
 arl = np.zeros((len(percentiles),num_repeats))
 arl_cusum = np.zeros((len(percentiles),num_repeats))
 arl_logit_cusum = np.zeros((len(percentiles_logit_cusum),num_repeats))
-data = GenDataMeanARH(num_repeats, stream_length, cp=None, mu=(mu_L, mu_L),  coef=rhos, scale=scale)
+data = GenDataMeanARH(num_repeats, stream_length, cp=None, mu=(mu_L, mu_L),  coef=rhos, scale=scale) #nulldata med cauchy
 num_streams = data.shape[0]
 for idx, percentile in enumerate(percentiles):
     for i in range(num_streams):
@@ -136,16 +133,16 @@ arl = np.mean(arl,axis=1)
 arl_logit_cusum = np.mean(arl_logit_cusum,axis=1)
 print(f"arl_logit_cusum: {arl_logit_cusum}")
 print(f"arl_cusum: {arl_cusum}")
-result_alt =  DataGenAlternative(
+result_alt =  DataGenAlternative( #data med changepoint og cauchy
                 N_sub=num_repeats,
                 B=B_val,
                 mu_L=mu_L,
                 n=stream_length,
-                ARcoef=rhos,
+                ARcoef=rhos, #rho er 0
                 tau_bound=tau_bound,
                 B_bound=B_bound,
-                ar_model="ARH",
-                scale=scale,
+                ar_model="ARH", #
+                scale=scale, #cauchy
                 sigma=sigma
             )
 data_alt = result_alt["data"]     

@@ -10,7 +10,7 @@ begin_time = time()
 
 # Project path setup
 script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(script_dir, ".."))
+project_root = os.path.abspath(os.path.join(script_dir, "../.."))
 sys.path.append(project_root)
 
 from autocpd.utils import *
@@ -32,7 +32,7 @@ thresholds = [99999]
 
 # Load model
 current_file = "train"
-model_name = "n100N600m24l5" #modell navn fra tensorboard, "vindu,antall serier trent på, bredde på NN, layers"
+model_name = "n100N400m24l5" #modell navn fra tensorboard, "vindu,antall serier trent på, bredde på NN, layers"
 logdir = Path("tensorboard_logs", f"{current_file}") 
 model_path = Path(logdir, model_name, "model.keras") #mappen
 print("Loading model from:", model_path)
@@ -49,7 +49,6 @@ def detect_change_in_stream_loc_batched(stream, model, window_length, threshold)
     logits = model.predict(windows, verbose=0) #finner en prediction for hvert av vinduene
     probs = tf.nn.softmax(logits, axis=1).numpy()[:, 1] #sannynlighet for at det finnes et changepoint i vinduet
     detection_idx = np.argmax(probs > threshold) #finner den første changepointen, hvis det ikke er noen over threshold returneres 0
-    print(detection_idx)
     if probs[detection_idx] > threshold: #hvis sannsynligheten er større enn threshold
         detection_time = detection_idx + window_length #changepoint er siste punkt i vinduet
     else:
